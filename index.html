@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>옥천교회 주소록 및 메모</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+        body { font-family: 'Pretendard', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-2 sm:p-4">
+
+    <!-- 모바일 프레임 -->
+    <div class="w-full max-w-sm bg-white rounded-[40px] shadow-2xl overflow-hidden flex flex-col h-[850px] border-8 border-gray-800 relative">
+        
+        <!-- 로딩 오버레이 (앱스 스크립트 통신 대기용) -->
+        <div id="loadingOverlay" class="absolute inset-0 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center z-[100] transition-opacity duration-300">
+            <i class="fa-solid fa-spinner fa-spin text-4xl text-blue-600 mb-4"></i>
+            <span class="text-sm text-gray-700 font-bold">서버에서 주소록을<br>불러오는 중입니다...</span>
+        </div>
+
+        <!-- 상태바 -->
+        <div class="bg-white px-6 pt-3 pb-1 flex justify-between items-center text-xs font-semibold text-gray-800 shrink-0">
+            <span>옥천교회</span>
+            <div class="flex items-center space-x-1.5">
+                <i class="fa-solid fa-signal"></i>
+                <i class="fa-solid fa-wifi"></i>
+                <i class="fa-solid fa-battery-full"></i>
+            </div>
+        </div>
+
+        <!-- 헤더 -->
+        <div class="px-5 pt-3 pb-2 flex justify-between items-center bg-white shrink-0">
+            <div class="flex items-center space-x-2">
+                <h1 id="appHeaderTitle" class="text-2xl font-bold text-gray-900">옥천교회 주소록</h1>
+                <span id="roleBadge" class="bg-gray-100 text-gray-600 text-[10px] px-2 py-0.5 rounded-full font-medium shadow-sm">성도 모드</span>
+            </div>
+            <div class="flex items-center space-x-2 text-gray-600">
+                <button id="headerActionButton" onclick="openAddModal()" class="w-8 h-8 rounded-full bg-blue-50 text-blue-600 items-center justify-center hover:bg-blue-100 transition hidden">
+                    <i class="fa-solid fa-plus text-sm"></i>
+                </button>
+                <button onclick="toggleAuthMode()" class="w-8 h-8 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center hover:bg-gray-200 transition" title="관리자 모드 전환">
+                    <i class="fa-solid fa-shield-halved text-xs"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- 검색바 -->
+        <div id="searchBarContainer" class="px-5 pb-3 bg-white shrink-0">
+            <div class="relative">
+                <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-gray-400 text-sm"></i>
+                <input type="text" id="searchInput" oninput="filterContacts()" placeholder="이름, 구역 또는 봉사 검색..." 
+                    class="w-full bg-gray-100 text-sm rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 transition">
+            </div>
+        </div>
+
+        <!-- 메인 콘텐츠 영역 (스크롤 가능) -->
+        <div id="mainContent" class="flex-1 overflow-y-auto px-5 pb-6 space-y-6">
+            <!-- 연락처 뷰 영역 -->
+            <div id="contactsView">
+                <div id="favoritesSection">
+                    <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">주요 연락처</h2>
+                    <div id="favoritesList" class="flex space-x-4 overflow-x-auto pb-2 scrollbar-none"></div>
+                </div>
+                <div class="mt-4">
+                    <h2 id="contactListTitle" class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">교회 전체 성도</h2>
+                    <div id="contactList" class="divide-y divide-gray-100"></div>
+                </div>
+            </div>
+
+            <!-- 주소록/교인명부 뷰 영역 -->
+            <div id="directoryView" class="hidden">
+                <div class="flex justify-between items-center mb-3">
+                    <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider">구역별 주소록 및 관리</h2>
+                    <span id="dirAddBtn" class="text-xs text-blue-600 font-semibold cursor-pointer hidden" onclick="openAddModal()">+ 성도 추가</span>
+                </div>
+                <div id="directoryList" class="space-y-3"></div>
+            </div>
+
+            <!-- 메모장 뷰 영역 -->
+            <div id="memoView" class="hidden h-full flex flex-col space-y-3">
+                <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider">교회 공용 사역 메모장</h2>
+                <textarea id="memoInput" oninput="saveMemo()" placeholder="여기에 집회 준비, 교제 내용, 기도 제목 등을 자유롭게 기록하세요..." 
+                    class="w-full flex-1 min-h-[450px] bg-amber-50/50 border border-amber-200 rounded-2xl p-4 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none leading-relaxed" disabled></textarea>
+                <div id="memoNotice" class="text-[11px] text-gray-400 text-right">성도 모드에서는 읽기 전용입니다.</div>
+            </div>
+
+            <!-- 최근기록 뷰 -->
+            <div id="otherView" class="hidden">
+                <div class="text-center py-24 text-gray-400 text-sm">
+                    <i class="fa-solid fa-clock-rotate-left text-3xl mb-3 text-gray-300"></i>
+                    <p id="otherViewText">최근 통화 기록이 없습니다.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 하단 네비게이션바 -->
+        <div class="bg-white border-t border-gray-100 py-3 px-4 flex justify-around items-center text-gray-400 shrink-0">
+            <button onclick="switchTab('contacts')" id="nav-contacts" class="flex flex-col items-center text-blue-600 focus:outline-none transition">
+                <i class="fa-solid fa-address-book text-lg"></i>
+                <span class="text-[10px] mt-1 font-medium">연락처</span>
+            </button>
+            <button onclick="switchTab('directory')" id="nav-directory" class="flex flex-col items-center hover:text-gray-600 focus:outline-none transition">
+                <i class="fa-solid fa-users text-lg"></i>
+                <span class="text-[10px] mt-1 font-medium">주소록</span>
+            </button>
+            <button onclick="switchTab('memo')" id="nav-memo" class="flex flex-col items-center hover:text-gray-600 focus:outline-none transition">
+                <i class="fa-solid fa-note-sticky text-lg"></i>
+                <span class="text-[10px] mt-1 font-medium">메모장</span>
+            </button>
+            <button onclick="switchTab('recent')" id="nav-recent" class="flex flex-col items-center hover:text-gray-600 focus:outline-none transition">
+                <i class="fa-solid fa-clock-rotate-left text-lg"></i>
+                <span class="text-[10px] mt-1 font-medium">최근기록</span>
+            </button>
+        </div>
+
+        <!-- 연락처/성도 추가 및 수정 모달 -->
+        <div id="addModal" class="absolute inset-0 bg-black/40 backdrop-blur-xs flex items-end justify-center hidden z-50">
+            <div class="bg-white w-full rounded-t-3xl p-6 shadow-2xl transform transition-transform duration-300">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 id="modalTitle" class="text-lg font-bold text-gray-900">새 성도 등록</h3>
+                    <button onclick="closeAddModal()" class="text-gray-400 hover:text-gray-600">
+                        <i class="fa-solid fa-xmark text-lg"></i>
+                    </button>
+                </div>
+                <form id="addContactForm" onsubmit="saveContact(event)" class="space-y-3">
+                    <input type="hidden" id="editContactId">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">이름 (형제/자매)</label>
+                        <input type="text" id="newName" required placeholder="예: 홍길동 형제" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">전화번호</label>
+                        <input type="text" id="newPhone" required placeholder="043-000-0000" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div class="relative">
+                        <label class="block text-xs font-medium text-gray-500 mb-1">주소 (자동완성)</label>
+                        <input type="text" id="newAddress" oninput="handleAddressInput()" placeholder="예: 옥천읍, 동이면, 청성면..." autocomplete="off" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <div id="addressSuggestions" class="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg hidden z-50 max-h-36 overflow-y-auto"></div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">소속 구역 / 봉사 / 특이사항</label>
+                        <input type="text" id="newMemo" placeholder="예: 1구역, 식당 봉사, 찬양팀 등" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div class="flex items-center space-x-2 pt-1">
+                        <input type="checkbox" id="newFavorite" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 border-gray-300">
+                        <label for="newFavorite" class="text-sm text-gray-700">주요 연락처에 추가</label>
+                    </div>
+                    <button type="submit" id="modalSubmitBtn" class="w-full bg-blue-600 text-white font-medium py-3 rounded-xl hover:bg-blue-700 transition">저장하기</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 관리자 인증 모달 -->
+        <div id="authModal" class="absolute inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center hidden z-50 p-4">
+            <div class="bg-white w-full rounded-3xl p-6 shadow-2xl">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-bold text-gray-900">관리자 모드 전환</h3>
+                    <button onclick="closeAuthModal()" class="text-gray-400 hover:text-gray-600">
+                        <i class="fa-solid fa-xmark text-lg"></i>
+                    </button>
+                </div>
+                <p class="text-xs text-gray-500 mb-4">주소록 관리를 위한 비밀번호를 입력해주세요.<br>(기본 비밀번호: 1234)</p>
+                <form onsubmit="verifyAdmin(event)" class="space-y-3">
+                    <input type="password" id="adminPassword" required placeholder="비밀번호 입력" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <button type="submit" class="w-full bg-blue-600 text-white font-medium py-3 rounded-xl hover:bg-blue-700 transition">확인</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 커스텀 삭제 확인 모달 -->
+        <div id="deleteConfirmModal" class="absolute inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center hidden z-50 p-4">
+            <div class="bg-white w-full max-w-xs rounded-3xl p-6 shadow-2xl text-center space-y-4">
+                <div class="w-12 h-12 rounded-full bg-red-50 text-red-500 flex items-center justify-center mx-auto text-xl">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                </div>
+                <div>
+                    <h3 class="text-base font-bold text-gray-900">연락처 삭제</h3>
+                    <p class="text-xs text-gray-500 mt-1">정말로 이 성도님의 정보를 삭제하시겠습니까?</p>
+                </div>
+                <input type="hidden" id="deleteTargetId">
+                <div class="flex space-x-2 pt-2">
+                    <button onclick="closeDeleteModal()" class="flex-1 bg-gray-100 text-gray-600 font-medium py-2.5 rounded-xl text-xs hover:bg-gray-200 transition">취소</button>
+                    <button onclick="confirmDeleteContact()" class="flex-1 bg-red-600 text-white font-medium py-2.5 rounded-xl text-xs hover:bg-red-700 transition">삭제하기</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 알림 토스트 -->
+        <div id="toast" class="absolute bottom-20 left-1/2 transform -translate-x-1/2 bg-gray-900/90 text-white text-xs px-4 py-2 rounded-full shadow-lg opacity-0 transition-opacity duration-300 pointer-events-none z-50 whitespace-nowrap">
+            알림 메시지
+        </div>
+
+    </div>
+
+    <script>
+        let contacts = [];
+        let isAdmin = false;
+        const baseAddresses = ['옥천읍', '동이면', '안남면', '안내면', '청성면', '청산면', '군서면', '군북면', '이원면'];
+
+        // 화면 켜질 때 서버에서 데이터 불러오기 (초기 더미 데이터 세팅)
+        window.onload = function() {
+            if (typeof google !== 'undefined' && typeof google.script !== 'undefined') {
+                google.script.run.withSuccessHandler(function(data) {
+                    contacts = data.contacts;
+                    document.getElementById('memoInput').value = data.memo;
+                    document.getElementById('loadingOverlay').classList.add('hidden');
+                    updateUIMode();
+                }).withFailureHandler(function(err) {
+                    showToast("데이터를 불러오는데 실패했습니다.");
+                    document.getElementById('loadingOverlay').classList.add('hidden');
+                }).getInitialData();
+            } else {
+                // 앱스 스크립트 환경이 아닐 경우 기본 데이터 제공
+                contacts = [
+                    { id: 1, name: '말씀 형제', phone: '043-733-0191', address: '옥천읍', memo: '말씀 전파', favorite: true, color: 'bg-blue-100 text-blue-600' },
+                    { id: 2, name: '행정 자매', phone: '043-733-0192', address: '교회 사무실', memo: '교회 행정 및 주보', favorite: true, color: 'bg-amber-100 text-amber-600' },
+                    { id: 3, name: '청년 형제', phone: '010-9876-5432', address: '청성면', memo: '청년 모임 인도', favorite: true, color: 'bg-emerald-100 text-emerald-600' },
+                    { id: 4, name: '찬양 자매', phone: '043-733-0193', address: '동이면', memo: '주일 찬양 인도', favorite: true, color: 'bg-purple-100 text-purple-600' },
+                    { id: 5, name: '교제 자매', phone: '010-1111-3333', address: '안내면', memo: '1구역 심방 및 교제', favorite: false, color: 'bg-rose-100 text-rose-600' },
+                    { id: 6, name: '봉사 형제', phone: '010-2222-4444', address: '옥천읍', memo: '교회 시설 관리 및 차량', favorite: false, color: 'bg-indigo-100 text-indigo-600' },
+                    { id: 7, name: '섬김 자매', phone: '010-5555-6666', address: '이원면', memo: '식당 봉사', favorite: false, color: 'bg-pink-100 text-pink-600' }
+                ];
+                let memoContent = localStorage.getItem('church_memo') || "■ 이번 주 광고 및 기도제목\n1. 주일 집회 은혜 가운데 드리게 하소서.\n2. 환우들을 위한 기도와 교제.\n3. 다음 세대 모임을 위한 준비.";
+                document.getElementById('memoInput').value = memoContent;
+                document.getElementById('loadingOverlay').classList.add('hidden');
+                updateUIMode();
+            }
+        };
+
+        function syncContactsToServer() {
+            if (typeof google !== 'undefined' && typeof google.script !== 'undefined') {
+                google.script.run.saveContactList(contacts);
+            }
+        }
+
+        function updateUIMode() {
+            const roleBadge = document.getElementById('roleBadge');
+            const headerBtn = document.getElementById('headerActionButton');
+            const dirAddBtn = document.getElementById('dirAddBtn');
+            const memoInput = document.getElementById('memoInput');
+            const memoNotice = document.getElementById('memoNotice');
+
+            if (isAdmin) {
+                roleBadge.textContent = '관리자 모드';
+                roleBadge.className = "bg-blue-100 text-blue-600 text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm";
+                headerBtn.style.display = 'flex';
+                dirAddBtn.style.display = 'inline';
+                memoInput.removeAttribute('disabled');
+                memoNotice.textContent = "내용은 실시간으로 저장됩니다.";
+            } else {
+                roleBadge.textContent = '성도 모드';
+                roleBadge.className = "bg-gray-100 text-gray-600 text-[10px] px-2 py-0.5 rounded-full font-medium shadow-sm";
+                headerBtn.style.display = 'none';
+                dirAddBtn.style.display = 'none';
+                memoInput.setAttribute('disabled', 'true');
+                memoNotice.textContent = "성도 모드에서는 읽기 전용입니다.";
+            }
+            renderContacts();
+        }
+
+        function toggleAuthMode() {
+            if (isAdmin) {
+                if (confirm('관리자 모드를 종료하시겠습니까?')) {
+                    isAdmin = false;
+                    updateUIMode();
+                    showToast('성도 모드로 안전하게 전환되었습니다.');
+                }
+            } else {
+                document.getElementById('authModal').classList.remove('hidden');
+            }
+        }
+
+        function closeAuthModal() {
+            document.getElementById('authModal').classList.add('hidden');
+            document.getElementById('adminPassword').value = '';
+        }
+
+        function verifyAdmin(e) {
+            e.preventDefault();
+            const pwd = document.getElementById('adminPassword').value;
+            if (pwd === '1234') {
+                isAdmin = true;
+                closeAuthModal();
+                updateUIMode();
+                showToast('관리자 권한이 부여되었습니다.');
+            } else {
+                alert('비밀번호가 올바르지 않습니다.');
+            }
+        }
+
+        function renderContacts(filteredList = contacts) {
+            const favoritesList = document.getElementById('favoritesList');
+            const contactList = document.getElementById('contactList');
+            const directoryList = document.getElementById('directoryList');
+            
+            const favs = filteredList.filter(c => c.favorite);
+            favoritesList.innerHTML = favs.length ? favs.map(c => `
+                <div class="flex flex-col items-center shrink-0 cursor-pointer group" onclick="makeCall('${c.name}', '${c.phone}')">
+                    <div class="w-14 h-14 rounded-full ${c.color} flex items-center justify-center font-bold text-sm shadow-sm group-hover:scale-105 transition relative text-center leading-tight">
+                        ${c.name.split(' ')[0].substring(0,2)}<br>${c.name.split(' ').length > 1 ? c.name.split(' ')[1].charAt(0) : ''}
+                        <span class="absolute bottom-0 right-0 w-4 h-4 bg-white rounded-full flex items-center justify-center text-[10px] text-red-500 shadow">
+                            <i class="fa-solid fa-heart"></i>
+                        </span>
+                    </div>
+                    <span class="text-xs font-semibold text-gray-800 mt-1.5">${c.name}</span>
+                    <span class="text-[10px] text-gray-400">${c.phone}</span>
+                </div>
+            `).join('') : '<p class="text-xs text-gray-400 py-2">주요 연락처가 없습니다.</p>';
+
+            contactList.innerHTML = filteredList.length ? filteredList.map(c => `
+                <div class="py-3 flex items-start justify-between hover:bg-gray-50 px-2 rounded-xl transition group">
+                    <div class="flex items-start space-x-3 cursor-pointer flex-1" onclick="makeCall('${c.name}', '${c.phone}')">
+                        <div class="w-10 h-10 rounded-full ${c.color} flex items-center justify-center font-bold text-xs shrink-0 mt-0.5 text-center leading-tight">
+                            ${c.name.split(' ')[0].substring(0,2)}
+                        </div>
+                        <div class="flex-1 min-w-0 pr-2">
+                            <div class="text-sm font-semibold text-gray-900 flex items-center space-x-1.5">
+                                <span class="truncate">${c.name}</span>
+                                ${c.address ? `<span class="text-[11px] font-normal text-gray-400">(${c.address})</span>` : ''}
+                            </div>
+                            <div class="text-xs text-gray-500 mt-0.5">${c.phone}</div>
+                            ${c.memo ? `<div class="text-[11px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded mt-1 inline-block truncate max-w-full"><i class="fa-solid fa-note-sticky mr-1 text-amber-500"></i>${c.memo}</div>` : ''}
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-1 shrink-0">
+                        ${isAdmin ? `
+                            <button onclick="toggleFavorite(${c.id})" class="text-gray-300 hover:text-red-500 transition p-2" title="즐겨찾기 토글">
+                                <i class="${c.favorite ? 'fa-solid fa-heart text-red-500' : 'fa-regular fa-heart'} text-sm"></i>
+                            </button>
+                        ` : ''}
+                        <button onclick="makeCall('${c.name}', '${c.phone}')" class="w-9 h-9 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center hover:bg-blue-600 hover:text-white transition shadow-xs">
+                            <i class="fa-solid fa-phone text-xs"></i>
+                        </button>
+                    </div>
+                </div>
+            `).join('') : '<div class="text-center py-10 text-gray-400 text-sm">등록된 성도가 없습니다.</div>';
+
+            directoryList.innerHTML = contacts.map(c => `
+                <div class="bg-gray-50 border border-gray-100 p-3.5 rounded-2xl space-y-2">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-sm font-bold text-gray-900">${c.name}</span>
+                                ${c.favorite ? '<span class="bg-blue-100 text-blue-600 text-[10px] px-2 py-0.5 rounded-full font-medium">주요</span>' : ''}
+                            </div>
+                            <div class="text-xs text-gray-500 mt-1"><i class="fa-solid fa-phone mr-1 text-gray-400"></i>${c.phone}</div>
+                            <div class="text-xs text-gray-400 mt-0.5"><i class="fa-solid fa-location-dot mr-1"></i>${c.address || '주소 정보 없음'}</div>
+                        </div>
+                        <div class="flex items-center space-x-1">
+                            ${isAdmin ? `
+                                <button onclick="openEditModal(${c.id})" class="w-8 h-8 rounded-full bg-white border border-gray-200 text-gray-600 flex items-center justify-center hover:bg-gray-100 transition text-xs">
+                                    <i class="fa-solid fa-pen"></i>
+                                </button>
+                                <button onclick="deleteContact(${c.id})" class="w-8 h-8 rounded-full bg-white border border-gray-200 text-red-500 flex items-center justify-center hover:bg-red-50 transition text-xs">
+                                    <i class="fa-solid fa-trash-can"></i>
+                                </button>
+                            ` : ''}
+                            <button onclick="makeCall('${c.name}', '${c.phone}')" class="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center hover:bg-blue-700 transition shadow-xs">
+                                <i class="fa-solid fa-phone text-xs"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="pt-2 border-t border-gray-200/60 flex items-center space-x-2">
+                        <i class="fa-solid fa-note-sticky text-[10px] text-amber-500"></i>
+                        <span class="text-xs text-gray-600 truncate">${c.memo || '등록된 메모가 없습니다.'}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function filterContacts() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            const filtered = contacts.filter(c => 
+                c.name.toLowerCase().includes(query) || 
+                c.phone.includes(query) || 
+                (c.address && c.address.toLowerCase().includes(query)) ||
+                (c.memo && c.memo.toLowerCase().includes(query))
+            );
+            renderContacts(filtered);
+        }
+
+        function handleAddressInput() {
+            const inputVal = document.getElementById('newAddress').value.trim().toLowerCase();
+            const suggestionBox = document.getElementById('addressSuggestions');
+            if (!inputVal) {
+                suggestionBox.classList.add('hidden');
+                suggestionBox.innerHTML = '';
+                return;
+            }
+            const matched = baseAddresses.filter(addr => addr.toLowerCase().includes(inputVal));
+            if (matched.length > 0) {
+                suggestionBox.innerHTML = matched.map(addr => `
+                    <div onclick="selectAddress('${addr}')" class="px-4 py-2 text-xs text-gray-700 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-none">
+                        <i class="fa-solid fa-location-dot text-blue-500 mr-2"></i>${addr}
+                    </div>
+                `).join('');
+                suggestionBox.classList.remove('hidden');
+            } else {
+                suggestionBox.classList.add('hidden');
+            }
+        }
+
+        function selectAddress(address) {
+            document.getElementById('newAddress').value = address;
+            document.getElementById('addressSuggestions').classList.add('hidden');
+        }
+
+        function makeCall(name, phone) {
+            window.location.href = `tel:${phone}`;
+            showToast(`${name}에게 전화를 연결합니다.`);
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.remove('opacity-0');
+            setTimeout(() => {
+                toast.classList.add('opacity-0');
+            }, 3000);
+        }
+
+        function toggleFavorite(id) {
+            if (!isAdmin) return;
+            const contact = contacts.find(c => c.id === id);
+            if (contact) {
+                contact.favorite = !contact.favorite;
+                filterContacts();
+                syncContactsToServer();
+            }
+        }
+
+        function openAddModal() {
+            if (!isAdmin) return;
+            document.getElementById('editContactId').value = '';
+            document.getElementById('modalTitle').textContent = '새 성도 등록';
+            document.getElementById('modalSubmitBtn').textContent = '서버에 저장하기';
+            document.getElementById('addContactForm').reset();
+            document.getElementById('addModal').classList.remove('hidden');
+        }
+
+        function openEditModal(id) {
+            if (!isAdmin) return;
+            const contact = contacts.find(c => c.id === id);
+            if (!contact) return;
+
+            document.getElementById('editContactId').value = contact.id;
+            document.getElementById('newName').value = contact.name;
+            document.getElementById('newPhone').value = contact.phone;
+            document.getElementById('newAddress').value = contact.address || '';
+            document.getElementById('newMemo').value = contact.memo || '';
+            document.getElementById('newFavorite').checked = contact.favorite;
+
+            document.getElementById('modalTitle').textContent = '성도 정보 수정';
+            document.getElementById('modalSubmitBtn').textContent = '수정 내역 저장';
+            document.getElementById('addModal').classList.remove('hidden');
+        }
+
+        function closeAddModal() {
+            document.getElementById('addModal').classList.add('hidden');
+            document.getElementById('addressSuggestions').classList.add('hidden');
+            document.getElementById('addContactForm').reset();
+        }
+
+        function saveContact(e) {
+            e.preventDefault();
+            if (!isAdmin) return;
+            const editId = document.getElementById('editContactId').value;
+            const name = document.getElementById('newName').value;
+            const phone = document.getElementById('newPhone').value;
+            const address = document.getElementById('newAddress').value;
+            const memo = document.getElementById('newMemo').value;
+            const favorite = document.getElementById('newFavorite').checked;
+
+            if (editId) {
+                const contact = contacts.find(c => c.id == editId);
+                if (contact) {
+                    contact.name = name;
+                    contact.phone = phone;
+                    contact.address = address;
+                    contact.memo = memo;
+                    contact.favorite = favorite;
+                }
+            } else {
+                const colors = ['bg-rose-100 text-rose-600', 'bg-blue-100 text-blue-600', 'bg-amber-100 text-amber-600', 'bg-purple-100 text-purple-600', 'bg-emerald-100 text-emerald-600'];
+                const randomColor = colors[Math.floor(Math.random() * colors.length)];
+                contacts.unshift({
+                    id: Date.now(), name, phone, address, memo, favorite, color: randomColor
+                });
+            }
+
+            closeAddModal();
+            filterContacts();
+            syncContactsToServer();
+            showToast('데이터가 성공적으로 저장되었습니다.');
+        }
+
+        function deleteContact(id) {
+            if (!isAdmin) return;
+            document.getElementById('deleteTargetId').value = id;
+            document.getElementById('deleteConfirmModal').classList.remove('hidden');
+        }
+
+        function closeDeleteModal() {
+            document.getElementById('deleteConfirmModal').classList.add('hidden');
+        }
+
+        function confirmDeleteContact() {
+            const id = Number(document.getElementById('deleteTargetId').value);
+            contacts = contacts.filter(c => c.id !== id);
+            closeDeleteModal();
+            filterContacts();
+            syncContactsToServer();
+            showToast('성도 정보가 삭제되었습니다.');
+        }
+
+        let memoTimeout;
+        function saveMemo() {
+            if (!isAdmin) return;
+            const text = document.getElementById('memoInput').value;
+            
+            clearTimeout(memoTimeout);
+            memoTimeout = setTimeout(() => {
+                if (typeof google !== 'undefined' && typeof google.script !== 'undefined') {
+                    google.script.run.saveMemoText(text);
+                    showToast('메모가 서버에 자동 저장되었습니다.');
+                } else {
+                    localStorage.setItem('church_memo', text);
+                }
+            }, 1000); 
+        }
+
+        function switchTab(tab) {
+            const views = {
+                'contacts': 'contactsView',
+                'directory': 'directoryView',
+                'memo': 'memoView',
+                'recent': 'otherView'
+            };
+            
+            Object.keys(views).forEach(t => {
+                document.getElementById(`nav-${t}`).className = "flex flex-col items-center hover:text-gray-600 focus:outline-none transition text-gray-400";
+                document.getElementById(views[t]).classList.add('hidden');
+            });
+            
+            document.getElementById(`nav-${tab}`).className = "flex flex-col items-center text-blue-600 focus:outline-none transition";
+            document.getElementById(views[tab]).classList.remove('hidden');
+            
+            const searchBarContainer = document.getElementById('searchBarContainer');
+            const appHeaderTitle = document.getElementById('appHeaderTitle');
+            const headerActionButton = document.getElementById('headerActionButton');
+            
+            searchBarContainer.classList.add('hidden');
+            if (isAdmin) headerActionButton.style.display = 'flex';
+
+            if(tab === 'contacts') {
+                appHeaderTitle.textContent = '옥천교회 주소록';
+                searchBarContainer.classList.remove('hidden');
+            } else if(tab === 'directory') {
+                appHeaderTitle.textContent = '교회 주소록 관리';
+            } else if(tab === 'memo') {
+                appHeaderTitle.textContent = '교제 / 사역 메모장';
+                headerActionButton.style.display = 'none';
+            } else if(tab === 'recent') {
+                appHeaderTitle.textContent = '최근 통화 기록';
+                headerActionButton.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>
