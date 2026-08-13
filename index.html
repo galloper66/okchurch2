@@ -196,45 +196,81 @@
 
     </div>
 
-    <script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // 환경 변수 및 Firebase 초기화
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'okcheon-church-app';
+        let firebaseConfig = {};
+        try {
+            firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        } catch (e) {
+            console.error("Firebase 구성 오류:", e);
+        }
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // 상태 변수
         let contacts = [];
-        let isAdmin = false;
+        let isAdmin = false; // 기본은 평신도(읽기 전용) 모드
         const baseAddresses = ['옥천읍', '동이면', '안남면', '안내면', '청성면', '청산면', '군서면', '군북면', '이원면'];
 
-        // 화면 켜질 때 서버에서 데이터 불러오기 (초기 더미 데이터 세팅)
-        window.onload = function() {
-            if (typeof google !== 'undefined' && typeof google.script !== 'undefined') {
-                google.script.run.withSuccessHandler(function(data) {
-                    contacts = data.contacts;
-                    document.getElementById('memoInput').value = data.memo;
-                    document.getElementById('loadingOverlay').classList.add('hidden');
-                    updateUIMode();
-                }).withFailureHandler(function(err) {
-                    showToast("데이터를 불러오는데 실패했습니다.");
-                    document.getElementById('loadingOverlay').classList.add('hidden');
-                }).getInitialData();
-            } else {
-                // 앱스 스크립트 환경이 아닐 경우 기본 데이터 제공
-                contacts = [
-                    { id: 1, name: '말씀 형제', phone: '043-733-0191', address: '옥천읍', memo: '말씀 전파', favorite: true, color: 'bg-blue-100 text-blue-600' },
-                    { id: 2, name: '행정 자매', phone: '043-733-0192', address: '교회 사무실', memo: '교회 행정 및 주보', favorite: true, color: 'bg-amber-100 text-amber-600' },
-                    { id: 3, name: '청년 형제', phone: '010-9876-5432', address: '청성면', memo: '청년 모임 인도', favorite: true, color: 'bg-emerald-100 text-emerald-600' },
-                    { id: 4, name: '찬양 자매', phone: '043-733-0193', address: '동이면', memo: '주일 찬양 인도', favorite: true, color: 'bg-purple-100 text-purple-600' },
-                    { id: 5, name: '교제 자매', phone: '010-1111-3333', address: '안내면', memo: '1구역 심방 및 교제', favorite: false, color: 'bg-rose-100 text-rose-600' },
-                    { id: 6, name: '봉사 형제', phone: '010-2222-4444', address: '옥천읍', memo: '교회 시설 관리 및 차량', favorite: false, color: 'bg-indigo-100 text-indigo-600' },
-                    { id: 7, name: '섬김 자매', phone: '010-5555-6666', address: '이원면', memo: '식당 봉사', favorite: false, color: 'bg-pink-100 text-pink-600' }
-                ];
-                let memoContent = localStorage.getItem('church_memo') || "■ 이번 주 광고 및 기도제목\n1. 주일 집회 은혜 가운데 드리게 하소서.\n2. 환우들을 위한 기도와 교제.\n3. 다음 세대 모임을 위한 준비.";
-                document.getElementById('memoInput').value = memoContent;
+        // 앱 초기화 및 클라우드 연결
+        async function initApp() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                
+                // 인증 성공 후 실시간 데이터 수신 시작
+                setupRealtimeListeners();
+            } catch (error) {
+                console.error("Auth Error:", error);
+                showToast("서버 접속에 실패했습니다. 오프라인 모드로 전환됩니다.");
                 document.getElementById('loadingOverlay').classList.add('hidden');
-                updateUIMode();
             }
-        };
+        }
 
-        function syncContactsToServer() {
-            if (typeof google !== 'undefined' && typeof google.script !== 'undefined') {
-                google.script.run.saveContactList(contacts);
-            }
+        // 실시간 클라우드 리스너
+        function setupRealtimeListeners() {
+            if (!auth.currentUser) return;
+
+            // 주소록 컬렉션 실시간 동기화
+            const contactsRef = collection(db, 'artifacts', appId, 'public', 'data', 'contacts');
+            onSnapshot(contactsRef, (snapshot) => {
+                contacts = [];
+                snapshot.forEach(doc => {
+                    contacts.push({ id: doc.id, ...doc.data() });
+                });
+                
+                // 최신 등록순으로 메모리 정렬
+                contacts.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+                
+                filterContacts();
+                document.getElementById('loadingOverlay').classList.add('hidden');
+            }, (error) => {
+                console.error("주소록 동기화 오류:", error);
+                showToast("주소록 갱신에 실패했습니다.");
+                document.getElementById('loadingOverlay').classList.add('hidden');
+            });
+
+            // 메모장 단일 문서 실시간 동기화
+            const memoRef = doc(db, 'artifacts', appId, 'public', 'data', 'memo', 'sharedMemo');
+            onSnapshot(memoRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    document.getElementById('memoInput').value = docSnap.data().text || "";
+                } else {
+                    document.getElementById('memoInput').value = "■ 이번 주 광고 및 기도제목\n1. 주일 집회 은혜 가운데 드리게 하소서.\n2. 환우들을 위한 기도와 교제.\n3. 다음 세대 모임을 위한 준비.";
+                }
+            }, (error) => {
+                console.error("메모 동기화 오류:", error);
+            });
         }
 
         function updateUIMode() {
@@ -250,7 +286,7 @@
                 headerBtn.style.display = 'flex';
                 dirAddBtn.style.display = 'inline';
                 memoInput.removeAttribute('disabled');
-                memoNotice.textContent = "내용은 실시간으로 저장됩니다.";
+                memoNotice.textContent = "입력한 내용은 실시간으로 클라우드에 공유됩니다.";
             } else {
                 roleBadge.textContent = '성도 모드';
                 roleBadge.className = "bg-gray-100 text-gray-600 text-[10px] px-2 py-0.5 rounded-full font-medium shadow-sm";
@@ -264,11 +300,10 @@
 
         function toggleAuthMode() {
             if (isAdmin) {
-                if (confirm('관리자 모드를 종료하시겠습니까?')) {
-                    isAdmin = false;
-                    updateUIMode();
-                    showToast('성도 모드로 안전하게 전환되었습니다.');
-                }
+                // 커스텀 모달 또는 즉시 로그아웃 (iframe 내 브라우저 경고창 방지)
+                isAdmin = false;
+                updateUIMode();
+                showToast('성도 모드로 안전하게 전환되었습니다.');
             } else {
                 document.getElementById('authModal').classList.remove('hidden');
             }
@@ -288,7 +323,7 @@
                 updateUIMode();
                 showToast('관리자 권한이 부여되었습니다.');
             } else {
-                alert('비밀번호가 올바르지 않습니다.');
+                showToast('비밀번호가 올바르지 않습니다.');
             }
         }
 
@@ -300,7 +335,7 @@
             const favs = filteredList.filter(c => c.favorite);
             favoritesList.innerHTML = favs.length ? favs.map(c => `
                 <div class="flex flex-col items-center shrink-0 cursor-pointer group" onclick="makeCall('${c.name}', '${c.phone}')">
-                    <div class="w-14 h-14 rounded-full ${c.color} flex items-center justify-center font-bold text-sm shadow-sm group-hover:scale-105 transition relative text-center leading-tight">
+                    <div class="w-14 h-14 rounded-full ${c.color || 'bg-blue-100 text-blue-600'} flex items-center justify-center font-bold text-sm shadow-sm group-hover:scale-105 transition relative text-center leading-tight">
                         ${c.name.split(' ')[0].substring(0,2)}<br>${c.name.split(' ').length > 1 ? c.name.split(' ')[1].charAt(0) : ''}
                         <span class="absolute bottom-0 right-0 w-4 h-4 bg-white rounded-full flex items-center justify-center text-[10px] text-red-500 shadow">
                             <i class="fa-solid fa-heart"></i>
@@ -314,7 +349,7 @@
             contactList.innerHTML = filteredList.length ? filteredList.map(c => `
                 <div class="py-3 flex items-start justify-between hover:bg-gray-50 px-2 rounded-xl transition group">
                     <div class="flex items-start space-x-3 cursor-pointer flex-1" onclick="makeCall('${c.name}', '${c.phone}')">
-                        <div class="w-10 h-10 rounded-full ${c.color} flex items-center justify-center font-bold text-xs shrink-0 mt-0.5 text-center leading-tight">
+                        <div class="w-10 h-10 rounded-full ${c.color || 'bg-gray-100 text-gray-600'} flex items-center justify-center font-bold text-xs shrink-0 mt-0.5 text-center leading-tight">
                             ${c.name.split(' ')[0].substring(0,2)}
                         </div>
                         <div class="flex-1 min-w-0 pr-2">
@@ -328,7 +363,7 @@
                     </div>
                     <div class="flex items-center space-x-1 shrink-0">
                         ${isAdmin ? `
-                            <button onclick="toggleFavorite(${c.id})" class="text-gray-300 hover:text-red-500 transition p-2" title="즐겨찾기 토글">
+                            <button onclick="toggleFavorite('${c.id}')" class="text-gray-300 hover:text-red-500 transition p-2" title="즐겨찾기 토글">
                                 <i class="${c.favorite ? 'fa-solid fa-heart text-red-500' : 'fa-regular fa-heart'} text-sm"></i>
                             </button>
                         ` : ''}
@@ -352,10 +387,10 @@
                         </div>
                         <div class="flex items-center space-x-1">
                             ${isAdmin ? `
-                                <button onclick="openEditModal(${c.id})" class="w-8 h-8 rounded-full bg-white border border-gray-200 text-gray-600 flex items-center justify-center hover:bg-gray-100 transition text-xs">
+                                <button onclick="openEditModal('${c.id}')" class="w-8 h-8 rounded-full bg-white border border-gray-200 text-gray-600 flex items-center justify-center hover:bg-gray-100 transition text-xs">
                                     <i class="fa-solid fa-pen"></i>
                                 </button>
-                                <button onclick="deleteContact(${c.id})" class="w-8 h-8 rounded-full bg-white border border-gray-200 text-red-500 flex items-center justify-center hover:bg-red-50 transition text-xs">
+                                <button onclick="deleteContact('${c.id}')" class="w-8 h-8 rounded-full bg-white border border-gray-200 text-red-500 flex items-center justify-center hover:bg-red-50 transition text-xs">
                                     <i class="fa-solid fa-trash-can"></i>
                                 </button>
                             ` : ''}
@@ -423,13 +458,16 @@
             }, 3000);
         }
 
-        function toggleFavorite(id) {
-            if (!isAdmin) return;
+        async function toggleFavorite(id) {
+            if (!isAdmin || !auth.currentUser) return;
             const contact = contacts.find(c => c.id === id);
             if (contact) {
-                contact.favorite = !contact.favorite;
-                filterContacts();
-                syncContactsToServer();
+                try {
+                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'contacts', id);
+                    await updateDoc(docRef, { favorite: !contact.favorite });
+                } catch(e) {
+                    console.error("즐겨찾기 갱신 실패", e);
+                }
             }
         }
 
@@ -437,7 +475,7 @@
             if (!isAdmin) return;
             document.getElementById('editContactId').value = '';
             document.getElementById('modalTitle').textContent = '새 성도 등록';
-            document.getElementById('modalSubmitBtn').textContent = '서버에 저장하기';
+            document.getElementById('modalSubmitBtn').textContent = '클라우드에 저장';
             document.getElementById('addContactForm').reset();
             document.getElementById('addModal').classList.remove('hidden');
         }
@@ -465,9 +503,10 @@
             document.getElementById('addContactForm').reset();
         }
 
-        function saveContact(e) {
+        async function saveContact(e) {
             e.preventDefault();
-            if (!isAdmin) return;
+            if (!isAdmin || !auth.currentUser) return;
+            
             const editId = document.getElementById('editContactId').value;
             const name = document.getElementById('newName').value;
             const phone = document.getElementById('newPhone').value;
@@ -475,27 +514,26 @@
             const memo = document.getElementById('newMemo').value;
             const favorite = document.getElementById('newFavorite').checked;
 
-            if (editId) {
-                const contact = contacts.find(c => c.id == editId);
-                if (contact) {
-                    contact.name = name;
-                    contact.phone = phone;
-                    contact.address = address;
-                    contact.memo = memo;
-                    contact.favorite = favorite;
+            try {
+                const contactsRef = collection(db, 'artifacts', appId, 'public', 'data', 'contacts');
+                
+                if (editId) {
+                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'contacts', editId);
+                    await updateDoc(docRef, { name, phone, address, memo, favorite });
+                    showToast('정보가 성공적으로 수정되었습니다.');
+                } else {
+                    const colors = ['bg-rose-100 text-rose-600', 'bg-blue-100 text-blue-600', 'bg-amber-100 text-amber-600', 'bg-purple-100 text-purple-600', 'bg-emerald-100 text-emerald-600'];
+                    const randomColor = colors[Math.floor(Math.random() * colors.length)];
+                    await addDoc(contactsRef, {
+                        name, phone, address, memo, favorite, color: randomColor, timestamp: Date.now()
+                    });
+                    showToast('새로운 성도 정보가 등록되었습니다.');
                 }
-            } else {
-                const colors = ['bg-rose-100 text-rose-600', 'bg-blue-100 text-blue-600', 'bg-amber-100 text-amber-600', 'bg-purple-100 text-purple-600', 'bg-emerald-100 text-emerald-600'];
-                const randomColor = colors[Math.floor(Math.random() * colors.length)];
-                contacts.unshift({
-                    id: Date.now(), name, phone, address, memo, favorite, color: randomColor
-                });
+                closeAddModal();
+            } catch (err) {
+                console.error("저장 실패:", err);
+                showToast("저장 중 오류가 발생했습니다.");
             }
-
-            closeAddModal();
-            filterContacts();
-            syncContactsToServer();
-            showToast('데이터가 성공적으로 저장되었습니다.');
         }
 
         function deleteContact(id) {
@@ -508,27 +546,34 @@
             document.getElementById('deleteConfirmModal').classList.add('hidden');
         }
 
-        function confirmDeleteContact() {
-            const id = Number(document.getElementById('deleteTargetId').value);
-            contacts = contacts.filter(c => c.id !== id);
-            closeDeleteModal();
-            filterContacts();
-            syncContactsToServer();
-            showToast('성도 정보가 삭제되었습니다.');
+        async function confirmDeleteContact() {
+            if (!isAdmin || !auth.currentUser) return;
+            const id = document.getElementById('deleteTargetId').value;
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'contacts', id);
+                await deleteDoc(docRef);
+                closeDeleteModal();
+                showToast('성도 정보가 완전히 삭제되었습니다.');
+            } catch(err) {
+                console.error("삭제 실패:", err);
+                showToast("삭제 중 오류가 발생했습니다.");
+            }
         }
 
         let memoTimeout;
         function saveMemo() {
-            if (!isAdmin) return;
+            if (!isAdmin || !auth.currentUser) return;
             const text = document.getElementById('memoInput').value;
             
             clearTimeout(memoTimeout);
-            memoTimeout = setTimeout(() => {
-                if (typeof google !== 'undefined' && typeof google.script !== 'undefined') {
-                    google.script.run.saveMemoText(text);
-                    showToast('메모가 서버에 자동 저장되었습니다.');
-                } else {
-                    localStorage.setItem('church_memo', text);
+            // 타이핑이 끝나고 1초 뒤에 클라우드에 자동 동기화
+            memoTimeout = setTimeout(async () => {
+                try {
+                    const memoRef = doc(db, 'artifacts', appId, 'public', 'data', 'memo', 'sharedMemo');
+                    await setDoc(memoRef, { text: text }, { merge: true });
+                    showToast('메모가 실시간 서버에 저장되었습니다.');
+                } catch(err) {
+                    console.error("메모 저장 실패:", err);
                 }
             }, 1000); 
         }
@@ -569,6 +614,29 @@
                 headerActionButton.style.display = 'none';
             }
         }
+
+        // HTML 요소의 onclick 이벤트에서 접근 가능하도록 함수들을 전역(window) 객체에 등록
+        window.filterContacts = filterContacts;
+        window.handleAddressInput = handleAddressInput;
+        window.selectAddress = selectAddress;
+        window.makeCall = makeCall;
+        window.toggleFavorite = toggleFavorite;
+        window.openAddModal = openAddModal;
+        window.openEditModal = openEditModal;
+        window.closeAddModal = closeAddModal;
+        window.saveContact = saveContact;
+        window.deleteContact = deleteContact;
+        window.closeDeleteModal = closeDeleteModal;
+        window.confirmDeleteContact = confirmDeleteContact;
+        window.saveMemo = saveMemo;
+        window.switchTab = switchTab;
+        window.toggleAuthMode = toggleAuthMode;
+        window.closeAuthModal = closeAuthModal;
+        window.verifyAdmin = verifyAdmin;
+
+        // 초기 구동
+        updateUIMode();
+        initApp();
     </script>
 </body>
 </html>
